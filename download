@@ -1,5 +1,11 @@
-.DS_Store
-Thumbs.db
-.env
+worker.js
+wrangler.jsonc
+package.json
+package-lock.json
+.assetsignore
+.gitignore
+.git/
 node_modules/
-dist/
+.wrangler/
+*.zip
+LICENSE

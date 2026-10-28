@@ -1,7 +1,9 @@
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
-  const MODEL_URL = 'https://huggingface.co/edgetools/migan/resolve/main/migan_pipeline_v2.onnx';
+  // Load the model through this site's Worker proxy to avoid browser CORS failures.
+  // Only the model file is proxied; user images remain in browser memory.
+  const MODEL_URL = '/model/migan_pipeline_v2.onnx';
   const ORT_BASE = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist/';
   const TESSERACT_BASE = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/';
   const LANG_BASE = 'https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng/4.0.0_best_int';
@@ -232,14 +234,14 @@
       if (!window.ort) throw new Error('โหลด ONNX Runtime ไม่สำเร็จ กรุณารีเฟรชหน้า');
       window.ort.env.wasm.wasmPaths = ORT_BASE;
       window.ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 1) : 1;
-      setProgress('ดาวน์โหลดโมเดล MI-GAN (~28 MB) ครั้งแรก…', 5);
+      setProgress('โหลดโมเดล MI-GAN (~28 MB) ผ่าน Worker ของเว็บ…', 5);
       try {
-        setStatus('กำลังเตรียม AI', 'เชื่อมต่อ WebGPU', 'เตรียม', 'busy');
+        setStatus('กำลังเตรียม AI', 'โหลดโมเดลจาก Worker ของเว็บ · ใช้ WebGPU ก่อน', 'เตรียม', 'busy');
         state.session = await window.ort.InferenceSession.create(MODEL_URL, { executionProviders: ['webgpu'], graphOptimizationLevel: 'all' });
         state.provider = 'WebGPU';
       } catch (gpuError) {
         console.warn('WebGPU init failed; falling back to WASM', gpuError);
-        setStatus('เปลี่ยนเป็นโหมด CPU', 'กำลังใช้ WASM สำรอง', 'สำรอง', 'busy');
+        setStatus('เปลี่ยนเป็นโหมด CPU', 'WebGPU ใช้ไม่ได้ · กำลังใช้ WASM สำรอง', 'สำรอง', 'busy');
         state.session = await window.ort.InferenceSession.create(MODEL_URL, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
         state.provider = 'WASM / CPU';
       }

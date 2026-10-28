@@ -1,79 +1,72 @@
-# ClearMark Studio — Local AI Inpainting
+# ClearMark Studio — CORS-fixed Cloudflare Worker build
 
-เว็บลบข้อความ/วัตถุจากภาพที่คุณเป็นเจ้าของหรือได้รับอนุญาตให้แก้ไข โดยใช้ AI Inpainting บนเบราว์เซอร์ ไม่ส่งไฟล์ภาพไป API หรือเซิร์ฟเวอร์ประมวลผลภาพ
+เว็บช่วยลบข้อความ/วัตถุจากภาพที่คุณเป็นเจ้าของหรือได้รับอนุญาตให้แก้ไข ใช้ MI-GAN ONNX ในเบราว์เซอร์ ภาพของผู้ใช้ไม่ถูกอัปโหลดไปยัง Worker หรือ API ประมวลผลภาพ
 
-## มีอะไรในโปรเจกต์นี้
+## แก้ปัญหา CORS ที่เจอใน Console
 
-- Static HTML/CSS/JavaScript: deploy ได้โดยตรงบน Cloudflare Pages
-- MI-GAN ONNX สำหรับ inpainting (โมเดลระบุใบอนุญาต MIT)
-- ใช้ WebGPU ก่อน และลอง WASM/CPU เมื่อ WebGPU เริ่มต้นหรือรัน inference ไม่สำเร็จ
-- OCR ผ่าน Tesseract.js เพื่อเสนอข้อความที่น่าสงสัยบริเวณขอบภาพ (heuristic; ไม่ใช่โมเดลตรวจจับลายน้ำโดยตรง)
-- ระบาย/คืนพื้นที่มาสก์ด้วยเมาส์ Undo/Redo, preview ก่อน/หลัง และดาวน์โหลด PNG
-- ภาพที่อัปโหลดอยู่ใน memory ของเบราว์เซอร์เท่านั้น ไม่มี upload endpoint
+ก่อนหน้านี้หน้าเว็บโหลดโมเดลโดยตรงจาก Hugging Face แล้วเบราว์เซอร์บล็อกการดาวน์โหลดด้วย CORS ทำให้ทั้ง WebGPU และ WASM ล้มเหลว รุ่นนี้เปลี่ยนเป็นโหลดโมเดลจาก URL ของเว็บตัวเอง `/model/migan_pipeline_v2.onnx` ผ่าน `worker.js` ซึ่งจะดึงเฉพาะไฟล์โมเดลจาก Hugging Face ฝั่ง Worker และส่ง stream กลับมา พร้อมแคชโมเดลไว้ที่ edge เมื่อ Cache API ใช้งานได้
 
-## ข้อจำกัดที่ควรทราบ
+**ข้อมูลภาพที่คุณเลือกไม่ถูกส่งไปยัง Hugging Face หรือ Worker** มีเพียงการร้องขอไฟล์โมเดล ~28 MB จาก Worker ไปยัง Hugging Face เท่านั้น การดาวน์โหลดครั้งแรกจึงต้องใช้อินเทอร์เน็ต
 
-1. **การตรวจจับอัตโนมัติเป็นเพียงตัวช่วย**: OCR ตรวจอ่านข้อความเป็นหลัก และเลือกข้อความที่อยู่ใกล้ขอบภาพตามกฎ heuristics จึงอาจพลาดโลโก้ล้วน ลายน้ำตรงกลาง ตัวอักษรบาง/จาง หรือเลือกข้อความสินค้ามาเป็นมาสก์ได้ ต้องตรวจสีแดงก่อนกด AI และปรับมาสก์เอง
-2. MI-GAN เป็น image inpainting ไม่ใช่ watermark detector และไม่สามารถรับประกันการสร้างพิกเซลเดิมกลับมาได้ โดยเฉพาะข้อความ รุ่นสินค้า ตัวเลขสเกล โลโก้ ขอบโลหะ/ฟันเฟือง และลวดลายละเอียด
-3. ครั้งแรกต้องเชื่อมต่ออินเทอร์เน็ตเพื่อดาวน์โหลด ONNX Runtime, Tesseract.js/ชุดภาษาอังกฤษ และโมเดล MI-GAN (~28 MB) จาก CDN/Hugging Face; ไฟล์ภาพต้นฉบับไม่ถูกส่งไปยังแหล่งเหล่านั้น
-4. ถ้าเปิดในโหมด WebGPU ไม่ได้ ระบบจะลอง WASM ซึ่งอาจช้าหรือใช้หน่วยความจำสูง โมเดลอาจทำงานไม่ได้บนอุปกรณ์ที่มีหน่วยความจำต่ำ
-5. ภาพที่มีด้านยาวเกิน 2048px จะถูกลดขนาดก่อนประมวลผล เพื่อหลีกเลี่ยงหน่วยความจำเต็ม ผลลัพธ์จะมีขนาดเท่ากับภาพที่ประมวลผล ไม่ใช่ภาพต้นฉบับขนาดเต็ม
-6. ปุ่มพอดีหน้าจอใช้ปรับการแสดงผลบน canvas เท่านั้น ไม่เพิ่มรายละเอียดภาพ
+## Deploy บน Cloudflare Workers + GitHub
 
-## Deploy บน GitHub + Cloudflare Pages
+โปรเจกต์นี้เพิ่ม `worker.js` และ `wrangler.jsonc` เพื่อแก้ CORS โดยใช้ Worker proxy แบบ same-origin จึงต้อง Deploy เป็น **Cloudflare Worker ที่มี Static Assets** (ไม่ใช่ Static Pages แบบที่ไม่มี Worker route)
 
-### วิธี A — ผ่าน GitHub Desktop (ง่ายสุด)
+### วิธีแนะนำ: GitHub เชื่อม Cloudflare Workers Builds
 
-1. ดาวน์โหลด ZIP โปรเจกต์นี้และแตกไฟล์
-2. สร้าง repository ใหม่บน GitHub ชื่อ `clearmark-studio` (ตั้งเป็น Public หรือ Private ได้)
-3. เปิด GitHub Desktop → **Add Existing Repository** (หรือสร้าง repository ในโฟลเดอร์นี้) และ publish/push ไฟล์ทั้งหมดขึ้น GitHub
-4. เข้า Cloudflare Dashboard → **Workers & Pages** → **Create application** → **Pages** → **Connect to Git**
-5. เลือก repository `clearmark-studio`
-6. ตั้งค่า build:
-   - Production branch: `main`
-   - Framework preset: `None`
-   - Build command: `exit 0` (หรือปล่อยว่าง หากหน้า UI อนุญาต)
-   - Build output directory: `.` (โฟลเดอร์รากของ repository)
-7. กด Deploy แล้วเปิด URL `*.pages.dev` ที่ระบบสร้างให้
+1. แตก ZIP และแทนที่ไฟล์โปรเจกต์ใน repository GitHub ด้วยไฟล์จากแพ็กเกจนี้ รวมทั้งไฟล์ที่ขึ้นต้นด้วยจุด เช่น `.assetsignore` และ `.gitignore`.
+2. Commit และ push ไปยัง branch `main`.
+3. ใน Cloudflare Dashboard เปิด Workers & Pages แล้วเลือก Worker ของ `clearmark-studio` หรือสร้าง Worker ใหม่ที่เชื่อมกับ repository นี้.
+4. หากตั้งค่าคำสั่ง Build/Deploy ได้ ให้ใช้:
+   - Build command: `npm install`
+   - Deploy command: `npm run deploy`
+   - Root directory: โฟลเดอร์ที่มี `wrangler.jsonc` อยู่
+5. ตรวจว่า Worker ใช้ชื่อ `clearmark-studio` ตาม `wrangler.jsonc` หรือแก้ค่าชื่อในไฟล์ให้ตรงกับ Worker ที่ต้องการ จากนั้น Deploy ใหม่.
+6. เปิดเว็บแล้วลอง URL `https://ชื่อ-worker.workers.dev/model/migan_pipeline_v2.onnx` โดยตรง ควรเริ่มดาวน์โหลดไฟล์ ONNX หรือแสดงการตอบกลับ binary (ไม่ใช่ 404). แล้วลองประมวลผลรูปในหน้าเว็บ.
 
-### วิธี B — ผ่าน Git ใน Command Prompt
+### Deploy จากคอมพิวเตอร์ด้วย Wrangler
 
-แตกไฟล์ ZIP แล้วเปิด terminal ในโฟลเดอร์ `ai-watermark-remover` จากนั้นใช้:
+ติดตั้ง Node.js LTS ก่อน จากนั้นเปิด Terminal ในโฟลเดอร์โปรเจกต์แล้วรัน:
 
 ```bash
-git init
-git add .
-git commit -m "Initial ClearMark Studio"
-git branch -M main
-git remote add origin https://github.com/YOUR-USERNAME/clearmark-studio.git
-git push -u origin main
+npm install
+npx wrangler login
+npm run deploy
 ```
 
-สร้าง repo เปล่าชื่อ `clearmark-studio` บน GitHub ก่อนใช้คำสั่ง และแทน `YOUR-USERNAME` ด้วยชื่อบัญชีจริง จากนั้นเชื่อม repo ใน Cloudflare Pages ตามขั้นตอนด้านบน
+หากชื่อ Worker ซ้ำหรือไม่ตรงกับโปรเจกต์ ให้แก้ `name` ใน `wrangler.jsonc` ก่อน Deploy
 
-## ทดสอบในเครื่อง
+## เช็กว่า Proxy ทำงานแล้ว
 
-เพราะ WebGPU, worker และการโหลดโมเดลควรทำงานบน HTTP(S) อย่าเปิด `index.html` ด้วย `file://` โดยตรง หากติดตั้ง Python แล้วให้เปิด terminal ในโฟลเดอร์โปรเจกต์และรัน:
+เปิด URL ของ Worker ตามด้วย `/model/migan_pipeline_v2.onnx` ตัวอย่างเช่น `https://clearmark-studio.<บัญชี>.workers.dev/model/migan_pipeline_v2.onnx`:
 
-```bash
-python -m http.server 8000
-```
+- ถ้ามีการดาวน์โหลด/ส่งไฟล์ binary ขนาดประมาณ 28 MB แสดงว่า route ใช้ได้.
+- ถ้าได้ `404` แสดงว่า Worker ยังไม่ได้ Deploy ด้วย config นี้ หรือไม่ได้สั่งให้ Worker ทำงานกับ `/model/*`.
+- ถ้าได้ `502` ดู Worker Logs เพื่อทราบสถานะที่ต้นทาง Hugging Face ส่งกลับมา.
+- หลังแก้แล้วกด Ctrl+F5 หรือเปิด Incognito เพื่อหลีกเลี่ยง JavaScript เก่าจาก cache.
 
-จากนั้นเปิด `http://localhost:8000` ใน Chrome หรือ Edge รุ่นใหม่
+## ฟีเจอร์
 
-## ลำดับใช้งาน
+- เลือกรูป JPG/PNG/WebP ได้ทีละภาพ (จำกัด 20 MB)
+- OCR ภาษาอังกฤษบนเบราว์เซอร์ ช่วยเสนอข้อความที่น่าสงสัยตามขอบภาพ
+- ระบาย/คืนพื้นที่มาสก์, Undo/Redo, preview ก่อน–หลัง และดาวน์โหลด PNG
+- MI-GAN ONNX ผ่าน ONNX Runtime Web; เลือก WebGPU ก่อนและลอง WASM/CPU หากเริ่มต้น WebGPU ไม่สำเร็จ
+- model proxy จำกัดไว้ที่ไฟล์ MI-GAN เท่านั้น ไม่ใช่ open proxy
 
-1. อัปโหลดไฟล์ JPG/PNG/WebP ไม่เกิน 20 MB
-2. กด **ตรวจจับข้อความที่ขอบภาพ** เพื่อให้ OCR เสนอพื้นที่เบื้องต้น หรือใช้แปรงระบายสีแดงเอง
-3. ตรวจมาสก์สีแดงให้แน่ใจว่าไม่ครอบคลุมรหัสรุ่น/สเกล/ตัวอักษรที่ต้องรักษา
-4. กด **เริ่มลบด้วย AI** แล้วรอโหลดโมเดลครั้งแรก
-5. เปรียบเทียบภาพด้านซ้ายและขวา ใช้ Undo/Redo หากต้องกลับสถานะก่อนหน้า
-6. ดาวน์โหลดผลลัพธ์ PNG
+## ข้อจำกัด
 
-## Dependencies และใบอนุญาต
+1. OCR ไม่ใช่ตัวตรวจจับลายน้ำโดยตรง อาจพลาดลายน้ำโลโก้/ลายน้ำกลางภาพ หรือเลือกข้อความสินค้าผิด ต้องตรวจสีแดงก่อนประมวลผล.
+2. Inpainting สร้างรายละเอียดขึ้นใหม่ ไม่ได้กู้พิกเซลที่ถูกทับกลับมาได้เหมือนเดิม โปรดระวังเลขรุ่น โลโก้ สเกล และเครื่องหมายรับรอง.
+3. ครั้งแรกต้องโหลดโมเดล ~28 MB และไลบรารี OCR/ONNX Runtime ผ่านอินเทอร์เน็ต แต่ภาพของคุณอยู่ในเบราว์เซอร์.
+4. Worker proxy เพิ่มหนึ่ง Worker request ต่อการดาวน์โหลดโมเดลที่ไม่อยู่ใน edge cache และยังอยู่ภายใต้ quota/ข้อกำหนดของ Cloudflare Free plan ไม่มีการเรียก paid AI API. หากการใช้งานเกิน quota ของแผน อาจต้องรอ quota รีเซ็ตหรือปรับแผน.
+5. `Unknown CPU vendor` จาก ONNX Runtime โดยทั่วไปเป็น log เตือนด้านการตรวจ CPU ไม่ใช่เหตุ CORS ที่ทำให้ดาวน์โหลดโมเดลล้มเหลว.
+6. หากเห็น `favicon.ico 404` จะหายเมื่อ browser ใช้ `favicon.svg` ที่เพิ่มในรุ่นนี้; ถ้ามี request เก่าจาก cache ให้ hard refresh.
 
-- MI-GAN ONNX mirror: [edgetools/migan](https://huggingface.co/edgetools/migan) — model card ระบุ MIT; ดูไฟล์ LICENSE ของแหล่งโมเดล
-- ONNX Runtime Web: [onnxruntime-web](https://github.com/microsoft/onnxruntime)
-- Tesseract.js: [tesseract.js](https://github.com/naptha/tesseract.js)
+## Dependencies / License
 
-โค้ดตัวอย่างนี้ให้มาในสภาพ best-effort โปรดตรวจใบอนุญาตและเงื่อนไขของ dependency/โมเดลที่โหลด ณ เวลานำไปใช้จริง และใช้เพื่อแก้ไขภาพที่คุณเป็นเจ้าของหรือได้รับสิทธิ์เท่านั้น
+- MI-GAN ONNX: [edgetools/migan](https://huggingface.co/edgetools/migan), model card ระบุ MIT; ไฟล์ต้นแบบจาก MI-GAN/Picsart AI Research.
+- ONNX Runtime Web: [Microsoft ONNX Runtime](https://github.com/microsoft/onnxruntime)
+- Tesseract.js: [Tesseract.js](https://github.com/naptha/tesseract.js)
+- Wrangler: [Cloudflare Wrangler](https://developers.cloudflare.com/workers/wrangler/)
+
+ใช้ภาพที่เป็นเจ้าของหรือได้รับอนุญาตให้แก้ไข และตรวจผลลัพธ์ก่อนนำไปเผยแพร่เชิงพาณิชย์
